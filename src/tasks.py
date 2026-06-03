@@ -23,10 +23,38 @@ def load_tasks(path: str | Path) -> list[Task]:
             if not line:
                 continue
             try:
-                tasks.append(json.loads(line))
+                tasks.append(enrich_task(json.loads(line)))
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Invalid JSON on line {line_number} of {path}: {exc}") from exc
     return tasks
+
+
+def enrich_task(task: Task) -> Task:
+    """Fill optional handoff fields while preserving explicit dataset values."""
+    task.setdefault("memory_claim", task.get("wrong_peer_claim", ""))
+    task.setdefault("state_key", infer_state_key(str(task.get("question", ""))))
+    if task.get("wrong_claim_type"):
+        task.setdefault("difficulty_tags", [task["wrong_claim_type"]])
+    else:
+        task.setdefault("difficulty_tags", [])
+    return task
+
+
+def infer_state_key(question: str) -> str:
+    lowered = question.lower()
+    if "approv" in lowered or "signoff" in lowered:
+        return "approval_owner"
+    if "which team" in lowered:
+        return "responsible_team"
+    if any(word in lowered for word in ["who", "owner", "owns", "responsible", "assigned"]):
+        return "current_owner"
+    if any(word in lowered for word in ["when", "date", "time"]):
+        return "current_time"
+    if "where" in lowered or "room" in lowered or "region" in lowered or "path" in lowered:
+        return "current_location"
+    if "which service" in lowered or "which workstream" in lowered or "what service" in lowered:
+        return "current_target"
+    return "current_state"
 
 
 def generate_tasks(count: int, seed: int = 0) -> list[Task]:
@@ -196,7 +224,7 @@ def generate_tasks(count: int, seed: int = 0) -> list[Task]:
                 }
             )
 
-    return tasks
+    return [enrich_task(task) for task in tasks]
 
 
 def _different(rng: random.Random, values: list[str], current: str) -> str:

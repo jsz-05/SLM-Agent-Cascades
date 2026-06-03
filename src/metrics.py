@@ -12,6 +12,25 @@ Task = dict[str, Any]
 
 ARTICLES = {"a", "an", "the"}
 ID_PATTERN = re.compile(r"\b[a-zA-Z]+\d+\b")
+UNKNOWN_PATTERNS = [
+    "unknown",
+    "unclear",
+    "not enough evidence",
+    "insufficient evidence",
+    "no team",
+    "no one",
+    "none",
+    "not assigned",
+    "not approved",
+    "not determined",
+    "not yet determined",
+    "has not been decided",
+    "has not been assigned",
+    "has not been approved",
+    "no approved",
+    "no current owner",
+    "no approved owner",
+]
 
 
 def evaluate_output(task: Task, raw_output: str, condition: str) -> tuple[str, dict[str, int | None]]:
@@ -44,6 +63,9 @@ def parse_answer(raw_output: str) -> str:
 
 def final_accuracy(task: Task, answer: str) -> int:
     normalized_answer = normalize_text(answer)
+    if normalize_text(str(task["gold_answer"])) == "unknown":
+        return int(is_unknown_answer(answer))
+
     candidates = [task["gold_answer"], *task.get("aliases", [])]
     for candidate in candidates:
         normalized_candidate = normalize_text(str(candidate))
@@ -57,7 +79,7 @@ def final_accuracy(task: Task, answer: str) -> int:
 
 
 def cascade_metric(task: Task, final_answer: str, raw_output: str) -> int:
-    if not task.get("wrong_peer_claim"):
+    if not task.get("wrong_peer_claim") and not task.get("memory_claim"):
         return 0
 
     peer_status = parse_peer_claim_status(raw_output)
@@ -77,7 +99,7 @@ def cascade_metric(task: Task, final_answer: str, raw_output: str) -> int:
 
 
 def correction_metric(task: Task, accuracy: int, cascade: int) -> int:
-    if not task.get("wrong_peer_claim"):
+    if not task.get("wrong_peer_claim") and not task.get("memory_claim"):
         return 0
     return int(accuracy == 1 and cascade == 0)
 
@@ -113,12 +135,17 @@ def infer_wrong_answer(task: Task) -> str:
     This is intentionally conservative. The seed and generator include
     wrong_answer, which is preferred for transparent cascade scoring.
     """
-    claim = str(task.get("wrong_peer_claim", ""))
+    claim = str(task.get("wrong_peer_claim") or task.get("memory_claim") or "")
     gold_norm = normalize_text(str(task.get("gold_answer", "")))
     for token in re.findall(r"\b[A-Z][A-Za-z0-9_-]*\b", claim):
         if normalize_text(token) != gold_norm:
             return token
     return ""
+
+
+def is_unknown_answer(answer: str) -> bool:
+    normalized_answer = normalize_text(answer)
+    return any(pattern in normalized_answer for pattern in UNKNOWN_PATTERNS)
 
 
 def normalize_text(text: str) -> str:

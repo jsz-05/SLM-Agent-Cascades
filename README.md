@@ -31,6 +31,16 @@ PEER_CLAIM: accepted|rejected|not_applicable
 REASON: <one sentence>
 ```
 
+## Handoff Modes
+
+`--handoff full_context` is the default negative-control setting: agents can see the original stream.
+
+`--handoff summary_only` first creates a compact handoff summary; downstream/final calls answer from that summary rather than the raw stream.
+
+`--handoff state_only` first creates a compact state artifact; downstream/final calls answer from that state only.
+
+`--handoff trusted_state` presents a current memory/state artifact before the raw stream. In plain and role conditions it is presented neutrally; evidence-gated prompts require cited message IDs before accepting it.
+
 ## Metrics
 
 `final_accuracy`: normalized exact/alias match against the gold answer.
@@ -83,7 +93,21 @@ python -m src.run \
   --models qwen/qwen3-4b \
   --protocols solo sequential committee \
   --conditions plain role evidence_gated \
+  --handoff full_context \
   --limit 5
+```
+
+To run a handoff stress test, change the handoff mode:
+
+```bash
+python -m src.run \
+  --data data/tasks_advanced.jsonl \
+  --run-name summary_stress \
+  --models qwen/qwen3-8b \
+  --protocols solo sequential committee \
+  --conditions plain role evidence_gated \
+  --handoff summary_only \
+  --limit 10
 ```
 
 ## Generated Synthetic Run
@@ -94,7 +118,8 @@ python -m src.run \
   --run-name generated_100 \
   --models qwen/qwen3-4b qwen/qwen3-14b openai/gpt-4.1-mini \
   --protocols solo sequential committee \
-  --conditions plain role evidence_gated
+  --conditions plain role evidence_gated \
+  --handoff trusted_state
 ```
 
 OpenRouter model strings are passed through from the CLI. The code does not hard-code a model family.
@@ -117,6 +142,7 @@ Each run creates one JSONL record per task/protocol/condition/model:
   "model": "qwen/qwen3-4b",
   "protocol": "solo",
   "condition": "evidence_gated",
+  "handoff": "full_context",
   "final_answer": "Bob",
   "raw_outputs": {"solo": "..."},
   "gold_answer": "Bob",
@@ -131,7 +157,7 @@ Each run creates one JSONL record per task/protocol/condition/model:
 }
 ```
 
-The Markdown summary aggregates rates by model, topology, and prompt condition.
+The Markdown summary aggregates rates by model, topology, prompt condition, and handoff mode.
 
 ## Limitations
 
