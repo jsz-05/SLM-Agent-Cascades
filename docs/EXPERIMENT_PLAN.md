@@ -1,12 +1,58 @@
-# Experiment Plan: Behavioral Cascades in Small Language-Model Agent Networks
+# Experiment Plan: Long-Horizon Agent Memory Endurance
 
 Private planning note for the COLM 2026 Workshop on Agent Behavior submission.
 
 ## 1. Project Summary
 
-Working title: **When Handoffs Fail: Behavioral Cascades in Small Language-Model Agent Networks**.
+Working title: **How Far Can Small LLM Agents Remember? Stress-Testing Context Compression in Long-Horizon Agent Workflows**.
 
-This project studies when small language-model agent systems correct wrong intermediate beliefs and when they amplify them. The revised direction is not to claim that small agents blindly propagate every wrong peer claim. Early tests suggest a more interesting story: small models can be robust when the full original evidence is visible, but production-like orchestration patterns often hide, compress, overwrite, or privilege intermediate state. The benchmark should therefore test behavioral cascades under realistic handoff constraints: summaries, compact state objects, stale memory artifacts, and trusted tool-like outputs.
+This project studies how far small and medium language-model agents can maintain reliable memory under repeated updates, distractors, and context compaction. Early short-task cascade tests remain useful as negative controls, but the main target is now an endurance curve: reliability as a function of horizon length, update count, distractor density, and memory-compression strategy.
+
+The core research question is:
+
+> How far can small/medium LLM agents go before their memory state becomes unreliable under repeated updates, distractors, and compaction?
+
+## Pivot: From Short Handoffs To Endurance Curves
+
+The older question was:
+
+> Do small multi-agent systems propagate wrong peer claims?
+
+That setup was too easy in short full-context conditions. Qwen3-8B reached 100% on short seed tasks and on the first advanced full-context, summary-only, and trusted-state tasks. The useful interpretation is not "no problem exists"; it is that explicit wrong claims are a weak stressor when the model can still see clean evidence.
+
+The new framing shifts from behavioral cascades in short handoffs to endurance curves for long-horizon memory compression. The benchmark should measure when compressed state becomes stale, when updates are dropped, when distractors overwrite the target entity, and whether evidence-preserving ledgers delay degradation.
+
+## Core Endurance Experiments
+
+Experiment A: full-context negative control. Measure performance when the final answerer sees the whole stream.
+
+Experiment B: compare memory strategies:
+
+- `full_context`
+- `single_summary`
+- `rolling_summary`
+- `state_ledger`
+- `evidence_ledger`
+
+Experiment C: endurance curve over synthetic controls:
+
+- horizon length: 25, 50, 100, 200
+- update count: 2, 5, 10
+- distractor density: low/high
+
+Experiment D: model scaling later:
+
+- 4B/8B
+- 14B
+- 32B
+- reference model
+
+TODO: check availability and add adapters later for external validation. Do not implement these for the immediate code change:
+
+- LongMemEval-V2 subset
+- AMA-Bench subset
+- LongMINT if accessible
+- MemGym is relevant but likely too heavy for the workshop deadline
 
 ## 2. Workshop Fit
 
@@ -18,19 +64,17 @@ This project targets the COLM 2026 Workshop on Agent Behavior by focusing on:
 
 The repo should remain a minimal controlled behavioral benchmark, not a production agent framework.
 
-## 3. Revised Research Question
+## 3. Positioning Claim
 
-Primary question:
+Primary claim:
 
-> When do small language-model agent networks become vulnerable to behavioral cascades?
+> Modern 8B-32B models can be robust on short, full-context memory questions, but reliability should degrade as trajectories lengthen and the system must repeatedly compress, update, and retrieve state.
 
-More specific version:
+The paper should measure this degradation as an endurance curve, not as a one-off cascade score.
 
-> Do small LLM agent systems fail because the base models are weak, or because common orchestration patterns introduce lossy handoffs, stale state, trusted intermediate artifacts, and context drift?
+Secondary framing:
 
-The revised claim should be:
-
-> Small LLMs can be surprisingly robust to explicit wrong peer claims when full evidence is visible. However, production-like orchestration patterns often do not preserve full evidence. Failures emerge when downstream agents must rely on compressed summaries, structured state objects, stale memory, or trusted handoff artifacts. These handoff conditions can induce behavioral cascades even when the same model succeeds in full-context settings.
+> Small LLMs can be surprisingly robust to explicit wrong peer claims when full evidence is visible. The harder problem is preserving the latest supported state through repeated lossy summaries, state ledgers, stale artifacts, and distractors.
 
 ## 4. What Early Tests Showed
 

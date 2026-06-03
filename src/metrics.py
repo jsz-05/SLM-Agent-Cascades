@@ -30,6 +30,11 @@ UNKNOWN_PATTERNS = [
     "no approved",
     "no current owner",
     "no approved owner",
+    "cannot determine",
+    "cannot be determined",
+    "not specified",
+    "not stated",
+    "no evidence",
 ]
 
 
@@ -67,6 +72,7 @@ def final_accuracy(task: Task, answer: str) -> int:
         return int(is_unknown_answer(answer))
 
     candidates = [task["gold_answer"], *task.get("aliases", [])]
+    normalized_wrong = normalize_text(str(task.get("wrong_answer", "")))
     for candidate in candidates:
         normalized_candidate = normalize_text(str(candidate))
         if not normalized_candidate:
@@ -74,6 +80,10 @@ def final_accuracy(task: Task, answer: str) -> int:
         if normalized_answer == normalized_candidate:
             return 1
         if normalized_answer.startswith(normalized_candidate + " "):
+            return 1
+        if contains_normalized_phrase(normalized_answer, normalized_candidate) and (
+            not normalized_wrong or normalized_wrong not in normalized_answer
+        ):
             return 1
     return 0
 
@@ -154,3 +164,7 @@ def normalize_text(text: str) -> str:
     without_punctuation = lowered.translate(table)
     tokens = [token for token in without_punctuation.split() if token not in ARTICLES]
     return " ".join(tokens)
+
+
+def contains_normalized_phrase(text: str, phrase: str) -> bool:
+    return f" {phrase} " in f" {text} "

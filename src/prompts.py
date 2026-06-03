@@ -80,6 +80,136 @@ def build_handoff_state_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
+def build_single_summary_messages(
+    task: Task,
+    condition: str,
+    summary_budget_events: int,
+) -> list[dict[str, str]]:
+    system = _memory_system(condition, "summary")
+    content = (
+        f"MESSAGE STREAM:\n{format_stream(task)}\n\n"
+        f"QUESTION TO ANSWER LATER: {task['question']}\n"
+        f"STATE KEY: {get_state_key(task)}\n\n"
+        "TASK:\n"
+        "Compress the stream into a compact memory summary for a later agent. "
+        "Preserve the newest authoritative value, important corrections, and supporting event IDs. "
+        "Drop distractors unless they are needed to avoid confusing the target entity.\n\n"
+        f"Keep at most {summary_budget_events} event-level facts.\n\n"
+        "OUTPUT FORMAT:\nSUMMARY: <compact summary>\nEVIDENCE: <event ids, or none>"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": content}]
+
+
+def build_rolling_summary_messages(
+    task: Task,
+    condition: str,
+    current_summary: str,
+    chunk: list[dict[str, Any]],
+    summary_budget_events: int,
+) -> list[dict[str, str]]:
+    system = _memory_system(condition, "rolling summary")
+    content = (
+        f"CURRENT ROLLING SUMMARY:\n{current_summary}\n\n"
+        f"NEW EVENTS:\n{format_events(chunk)}\n\n"
+        f"QUESTION TO ANSWER LATER: {task['question']}\n"
+        f"STATE KEY: {get_state_key(task)}\n\n"
+        "TASK:\n"
+        "Update the rolling summary using only the current summary and new events. "
+        "Preserve the latest authoritative state needed for the later question, plus event IDs. "
+        "If a new authoritative update supersedes an older value, keep the new value and its evidence.\n\n"
+        f"Keep at most {summary_budget_events} event-level facts.\n\n"
+        "OUTPUT FORMAT:\nSUMMARY: <updated compact summary>\nEVIDENCE: <event ids, or none>"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": content}]
+
+
+def build_state_ledger_messages(
+    task: Task,
+    condition: str,
+    current_ledger: str,
+    chunk: list[dict[str, Any]],
+    evidence_ledger: bool = False,
+) -> list[dict[str, str]]:
+    system = _memory_system(condition, "evidence ledger" if evidence_ledger else "state ledger")
+    state_key = get_state_key(task)
+    final_label = "REASON" if evidence_ledger else "NOTES"
+    final_instruction = (
+        "one sentence explaining why this value supersedes earlier values"
+        if evidence_ledger
+        else "one short sentence"
+    )
+    content = (
+        f"CURRENT STATE LEDGER:\n{current_ledger}\n\n"
+        f"NEW EVENTS:\n{format_events(chunk)}\n\n"
+        f"QUESTION TO ANSWER LATER: {task['question']}\n"
+        f"STATE KEY: {state_key}\n\n"
+        "TASK:\n"
+        "Update only the compact state needed for the future question. "
+        "Ignore distractors and non-authoritative comments. "
+        "If the new events contain an authoritative update for the state key, replace stale values."
+    )
+    if evidence_ledger:
+        content += " Preserve the event ID supporting the current value."
+    content += (
+        "\n\nOUTPUT FORMAT:\n"
+        "STATE:\n"
+        f"{state_key}: <value or unknown>\n"
+        "EVIDENCE:\n"
+        "<event ids, or none>\n"
+        f"{final_label}:\n"
+        f"<{final_instruction}>"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": content}]
+
+
+def build_memory_answer_messages(
+    task: Task,
+    condition: str,
+    memory_strategy: str,
+    artifact: str,
+) -> list[dict[str, str]]:
+    if memory_strategy not in {"single_summary", "rolling_summary", "state_ledger", "evidence_ledger"}:
+        raise ValueError(f"Memory answer prompts do not support memory_strategy={memory_strategy}")
+
+    if memory_strategy in {"single_summary", "rolling_summary"}:
+        artifact_label = "MEMORY SUMMARY"
+        system = {
+            "plain": "You answer concisely from a compressed memory summary.",
+            "role": "You are a long-horizon agent answering from compressed memory.",
+            "evidence_gated": (
+                "You are an evidence-gated assistant answering from compressed memory. "
+                "Use preserved evidence IDs and do not invent IDs."
+            ),
+        }[condition]
+    else:
+        artifact_label = "STATE LEDGER"
+        system = {
+            "plain": "You answer concisely from a compact state ledger.",
+            "role": "You are a long-horizon agent answering from a state ledger.",
+            "evidence_gated": (
+                "You are an evidence-gated assistant answering from a state ledger. "
+                "Use preserved evidence IDs and do not invent IDs."
+            ),
+        }[condition]
+
+    text = f"{artifact_label}:\n{artifact}\n\nQUESTION: {task['question']}"
+    if memory_strategy == "evidence_ledger":
+        text += (
+            "\n\nUse the ledger evidence IDs to support the final answer."
+            "\n\nOUTPUT FORMAT:\n"
+            "ANSWER: <short answer>\n"
+            "EVIDENCE: <comma-separated event ids, or none>\n"
+            "PEER_CLAIM: accepted|rejected|not_applicable\n"
+            "REASON: <one sentence>"
+        )
+        return [{"role": "system", "content": system}, {"role": "user", "content": text}]
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": _with_output_instructions(text, condition, final=True, has_original_stream=False)},
+    ]
+
+
 def build_artifact_answer_messages(
     task: Task,
     condition: str,
@@ -253,7 +383,22 @@ def get_state_key(task: Task) -> str:
 
 
 def format_stream(task: Task) -> str:
-    return "\n".join(f"{message['id']}: {message['text']}" for message in task["stream"])
+    return format_events(task["stream"])
+
+
+def format_events(events: list[dict[str, Any]]) -> str:
+    return "\n".join(f"{message['id']}: {message['text']}" for message in events)
+
+
+def _memory_system(condition: str, role_name: str) -> str:
+    return {
+        "plain": f"You maintain compact {role_name} memory for a long-horizon agent.",
+        "role": f"You are the long-horizon agent {role_name} maintainer.",
+        "evidence_gated": (
+            f"You maintain evidence-gated {role_name} memory. Preserve event IDs for "
+            "claims that may be needed later."
+        ),
+    }[condition]
 
 
 def _full_context_text(task: Task, condition: str, final: bool, handoff: str) -> str:
